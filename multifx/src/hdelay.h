@@ -36,7 +36,7 @@ public:
 
 
     float dl_l = delayLineL[0]->Read();
-    float dl_r = delayLineR[0]->Read();
+    float dl_r = delayLineR[0]->ReadWithPhase(delay_type == D_PONG ? delay_samples: 0);
 
     switch (delay_type) {
       case D_STR:
@@ -64,7 +64,7 @@ public:
         }
 
         delayLineL[0]->Write( (*_sig_l) + dl_r * feedback);
-        delayLineR[0]->Write( (*_sig_r) + dl_l * feedback);
+        delayLineR[0]->Write( (*_sig_l) + dl_l * feedback);
 
       break;
     }
@@ -90,6 +90,10 @@ public:
       delay_type += incr;
     } else if (delay_type+incr >= DELAY_TYPE_COUNT) delay_type = 0; // round robin the menu items
       else if (delay_type+incr < 0) delay_type = DELAY_TYPE_COUNT-1;
+  }
+
+  void SetDelayType(int _delay_type){
+    delay_type = _delay_type;
   }
 
   std::string GetDelayTypeStr () {

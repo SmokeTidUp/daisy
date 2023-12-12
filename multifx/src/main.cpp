@@ -21,18 +21,23 @@ using namespace daisysp;
 #define DL_MULT_COUNT 13
 
 CpuLoadMeter cpumeter;
-
 Bluemchen bluemchen;
-
 rings::Reverb rings_reverb;
 clouds::Reverb clouds_reverb;
+clouds::FloatFrame clouds_frame;
+Parameter knob1;
+Parameter knob2;
+Parameter cv1;
+Parameter cv2;
+AdEnv boot_envelope;
+
+bool just_booted = true;
 
 uint16_t rings_reverb_buffer[65536];
 uint16_t clouds_reverb_buffer[65536];
 
-clouds::FloatFrame clouds_frame;
 
-const size_t max_delay_time =  SAMPLE_RATE*10;
+const size_t max_delay_time =  SAMPLE_RATE*40;
 
 hbpm bpm;
 hdelay<float, max_delay_time> delay;
@@ -41,10 +46,6 @@ DelayLine<float, max_delay_time> DSY_SDRAM_BSS delaylineMemL[3];
 DelayLine<float, max_delay_time> DSY_SDRAM_BSS delaylineMemR[3];
 
 
-Parameter knob1;
-Parameter knob2;
-Parameter cv1;
-Parameter cv2;
 
 float _diffusion = 0.75f;
 float _rvb_time;
@@ -58,6 +59,7 @@ bool incoming_gate = false;
 const float dl_mult[DL_MULT_COUNT] =         {0.0625f, 0.125f, 0.25f, 0.50f, 0.75f, 1.f, 2.f, 3.f, 4.f, 8.f, 16.f, 32.f, 64.f};
 std::string dl_mult_strings[DL_MULT_COUNT] = { "1/16",  "1/8", "1/4", "1/2", "3/4", "1", "2", "3", "4", "8", "16", "32", "64"};
 int dl_mult_setting = 2;
+bool dl_mult_changed = false;
 
 int sel_m_it = 0; // selected menu item row
 bool chg_val = false; // changing values? check if scrolling through menu or changing menu values
@@ -136,6 +138,8 @@ void UpdateControls()
     int incr = bluemchen.encoder.Increment();
     float incr_dec = 0.1f * incr;
 
+    dl_mult_changed = false;
+
     if(chg_val) {
 
       switch(sel_m_it) {
@@ -148,6 +152,7 @@ void UpdateControls()
              dl_mult_setting + incr >= 0){
 
             dl_mult_setting += incr;
+            dl_mult_changed = true;
           }
         break;
         case 2: // reverb level
@@ -196,7 +201,7 @@ void UpdateControls()
     if (cv1.Value() > 500.0f && incoming_gate == false) {
         bpm.Process();
 
-        if(bpm.BpmChanged())
+        if(bpm.BpmChanged() || dl_mult_changed)
           delay.SetDelay((SAMPLE_RATE*60*dl_mult[dl_mult_setting]) / bpm.GetBpm());
 
         incoming_gate = true;
@@ -212,12 +217,19 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 {
     cpumeter.OnBlockStart();
 
+    if (just_booted) {
+
+      boot_envelope.Trigger();
+    }
+
     UpdateControls();
     for (size_t i = 0; i < size; i++)
-    {
+    {   
+        float be;
+          if (just_booted) be = boot_envelope.Process();
 
-        float sig_l = in[0][i];
-        float sig_r = in[1][i];
+        float sig_l = in[0][i]*(1-be);
+        float sig_r = in[1][i]*(1-be);
 
         // left input signal will go to both reverbs
         float rings_sig_l = sig_l;
@@ -251,17 +263,18 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
 
         switch(rvb_mode) {
             case CLOUDS_MODE:
-                out[0][i] = (clouds_frame.l*rvb_lvl) + (dly_sig_l*dly_lvl);
-                out[1][i] = (clouds_frame.r*rvb_lvl) + (dly_sig_r*dly_lvl);
+                out[0][i] = (1-be) * ((clouds_frame.l*rvb_lvl) + (dly_sig_l*dly_lvl));
+                out[1][i] = (1-be) * ((clouds_frame.r*rvb_lvl) + (dly_sig_r*dly_lvl));
             break;
             case RINGS_MODE:
-                out[0][i] = (rings_sig_l*rvb_lvl) + (dly_sig_l*dly_lvl);
-                out[1][i] = (rings_sig_r*rvb_lvl) + (dly_sig_r*dly_lvl);
+                out[0][i] = (1-be) * ((rings_sig_l*rvb_lvl) + (dly_sig_l*dly_lvl));
+                out[1][i] = (1-be) * ((rings_sig_r*rvb_lvl) + (dly_sig_r*dly_lvl));
             break;
 
         }
     }
 
+  just_booted = false;
   cpumeter.OnBlockEnd();
 }
 
@@ -286,6 +299,13 @@ int main(void)
     delay.Init(max_delay_time, delaylineMemL, delaylineMemR);
 
     cpumeter.Init(SAMPLE_RATE, 48);
+
+    boot_envelope.Init(SAMPLE_RATE);
+    boot_envelope.SetTime(ADENV_SEG_ATTACK, 2);
+    boot_envelope.SetTime(ADENV_SEG_DECAY, 2);
+    boot_envelope.SetMin(0.0);
+    boot_envelope.SetMax(1.0);
+    boot_envelope.SetCurve(100);
 
     bluemchen.StartAudio(AudioCallback);
 
