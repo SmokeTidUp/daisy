@@ -17,7 +17,7 @@ using namespace daisysp;
 #define CLOUDS_MODE 0
 #define RINGS_MODE 1
 #define SAMPLE_RATE 48000
-#define MENU_ITEMS 4
+#define MENU_ITEMS 6
 #define DL_MULT_COUNT 13
 
 CpuLoadMeter cpumeter;
@@ -59,8 +59,9 @@ const float dl_mult[DL_MULT_COUNT] =         {0.0625f, 0.125f, 0.25f, 0.50f, 0.7
 std::string dl_mult_strings[DL_MULT_COUNT] = { "1/16",  "1/8", "1/4", "1/2", "3/4", "1", "2", "3", "4", "8", "16", "32", "64"};
 int dl_mult_setting = 2;
 
-int sel_m_it_row = 0; // selected menu item row
+int sel_m_it = 0; // selected menu item row
 bool chg_val = false; // changing values? check if scrolling through menu or changing menu values
+int menu_item = 0;
 
 float dly_lvl = 0.7f;
 float rvb_lvl = 0.7f;
@@ -70,30 +71,40 @@ void UpdateOled()
     bluemchen.display.Fill(false);
 
     // draw an arrow on selected menu item
-    bluemchen.display.SetCursor(0, sel_m_it_row*8);
+    bluemchen.display.SetCursor(sel_m_it < 4 ? 0 : 32, sel_m_it < 4 ? sel_m_it*8 : (sel_m_it - 4) * 8);
     std::string str = ">";
     char *cstr = &str[0];
     bluemchen.display.WriteString(cstr, Font_6x8, true);
 
-    //menu item 0
-    bluemchen.display.SetCursor(sel_m_it_row == 0 ? 7 : 0, 0);
+    menu_item = 0;
+    bluemchen.display.SetCursor(sel_m_it == menu_item ? 7 : 0, 0);
     str = rvb_mode_names[rvb_mode];
-    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it_row == 0 && chg_val));
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it == menu_item && chg_val));
 
-    //menu item 1
-    bluemchen.display.SetCursor(sel_m_it_row == 1 ? 7 : 0, 8);
+    menu_item = 1;
+    bluemchen.display.SetCursor(sel_m_it == menu_item ? 7 : 0, 8);
     str = dl_mult_strings[dl_mult_setting];
-    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it_row == 1 && chg_val));
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it == menu_item && chg_val));
 
-    //menu item 2
-    bluemchen.display.SetCursor(sel_m_it_row == 2 ? 7 : 0, 16);
+    menu_item = 2;
+    bluemchen.display.SetCursor(sel_m_it == menu_item ? 7 : 0, 16);
     str = "r: " + std::to_string(static_cast<int>(rvb_lvl*10));
-    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it_row == 2 && chg_val));
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it == menu_item && chg_val));
 
-    //menu item 3
-    bluemchen.display.SetCursor(sel_m_it_row == 3 ? 7 : 0, 24);
+    menu_item = 3;
+    bluemchen.display.SetCursor(sel_m_it == menu_item ? 7 : 0, 24);
     str = "d: " + std::to_string(static_cast<int>(dly_lvl*10));
-    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it_row == 3 && chg_val));
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it == menu_item && chg_val));
+
+    menu_item = 4;
+    bluemchen.display.SetCursor(sel_m_it == menu_item ? 39 : 32, 0);
+    str = "f: " + std::to_string(static_cast<int>(_rvb_lp_freq*10));
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it == menu_item && chg_val));
+
+    menu_item = 5;
+    bluemchen.display.SetCursor(sel_m_it == menu_item ? 39 : 32, 8);
+    str = delay.GetDelayTypeStr();
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it == menu_item && chg_val));
 
 
 
@@ -127,7 +138,7 @@ void UpdateControls()
 
     if(chg_val) {
 
-      switch(sel_m_it_row) {
+      switch(sel_m_it) {
         case 0: // reverb mode
           if(incr != 0)
             rvb_mode = ++rvb_mode > 1 ? 0 : 1;
@@ -149,17 +160,25 @@ void UpdateControls()
               dly_lvl + incr_dec >= 0)
             dly_lvl += incr_dec;
         break;
+        case 4: // reverb filter
+          if (_rvb_lp_freq + incr_dec < 1.0f && 
+              _rvb_lp_freq + incr_dec >= 0)
+            _rvb_lp_freq += incr_dec;
+        break;
+        case 5: // delay type
+          delay.NextDelayType(incr);
+        break;
       }
 
     } else {
 
-      if(sel_m_it_row + incr < MENU_ITEMS && 
-         sel_m_it_row + incr >= 0) {
+      if(sel_m_it + incr < MENU_ITEMS && 
+         sel_m_it + incr >= 0) {
 
-        sel_m_it_row += incr;
+        sel_m_it += incr;
 
-      } else if (sel_m_it_row+incr >= MENU_ITEMS) sel_m_it_row = 0; // round robin the menu items
-        else if (sel_m_it_row+incr < 0) sel_m_it_row = MENU_ITEMS-1;
+      } else if (sel_m_it+incr >= MENU_ITEMS) sel_m_it = 0; // round robin the menu items
+        else if (sel_m_it+incr < 0) sel_m_it = MENU_ITEMS-1;
 
 
 
@@ -177,7 +196,8 @@ void UpdateControls()
     if (cv1.Value() > 500.0f && incoming_gate == false) {
         bpm.Process();
 
-        delay.SetDelay((SAMPLE_RATE*60*dl_mult[dl_mult_setting]) / bpm.GetBpm());
+        if(bpm.BpmChanged())
+          delay.SetDelay((SAMPLE_RATE*60*dl_mult[dl_mult_setting]) / bpm.GetBpm());
 
         incoming_gate = true;
     }
@@ -223,7 +243,7 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         clouds_reverb.set_input_gain(0.8);
         clouds_reverb.set_lp(_rvb_lp_freq);// : 0.6f);
 
-        rings_reverb.Process(&sig_l, &sig_r, 1);
+        rings_reverb.Process(&rings_sig_l, &rings_sig_r, 1);
 
         clouds_reverb.Process(&clouds_frame, 1);
 

@@ -17,6 +17,8 @@ public:
 		timekeeper.Start();
 	}
 
+	bool BpmChanged() { return bpm_changed;}
+
 
 	float GetBpm() { return _bpm; }
 
