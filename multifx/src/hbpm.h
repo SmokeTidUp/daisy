@@ -18,7 +18,7 @@ public:
 	}
 
 
-	float getBpm() { return _bpm; }
+	float GetBpm() { return _bpm; }
 
 	
 private:

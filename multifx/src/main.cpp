@@ -17,6 +17,10 @@ using namespace daisysp;
 #define CLOUDS_MODE 0
 #define RINGS_MODE 1
 #define SAMPLE_RATE 48000
+#define MENU_ITEMS 4
+#define DL_MULT_COUNT 13
+
+CpuLoadMeter cpumeter;
 
 Bluemchen bluemchen;
 
@@ -28,8 +32,14 @@ uint16_t clouds_reverb_buffer[65536];
 
 clouds::FloatFrame clouds_frame;
 
+const size_t max_delay_time =  SAMPLE_RATE*10;
+
 hbpm bpm;
-hdelay delay;
+hdelay<float, max_delay_time> delay;
+
+DelayLine<float, max_delay_time> DSY_SDRAM_BSS delaylineMemL[3];
+DelayLine<float, max_delay_time> DSY_SDRAM_BSS delaylineMemR[3];
+
 
 Parameter knob1;
 Parameter knob2;
@@ -38,26 +48,64 @@ Parameter cv2;
 
 float _diffusion = 0.75f;
 float _rvb_time;
-float _rvb_lp_freq;
+float _rvb_lp_freq = 0.6;
 
 int rvb_mode = CLOUDS_MODE;
-std::string rvb_mode_names[2] = {"CLOUDS", "RINGS"};
+std::string rvb_mode_names[2] = {"CLD", "RNG"};
 
 bool incoming_gate = false;
+
+const float dl_mult[DL_MULT_COUNT] =         {0.0625f, 0.125f, 0.25f, 0.50f, 0.75f, 1.f, 2.f, 3.f, 4.f, 8.f, 16.f, 32.f, 64.f};
+std::string dl_mult_strings[DL_MULT_COUNT] = { "1/16",  "1/8", "1/4", "1/2", "3/4", "1", "2", "3", "4", "8", "16", "32", "64"};
+int dl_mult_setting = 2;
+
+int sel_m_it_row = 0; // selected menu item row
+bool chg_val = false; // changing values? check if scrolling through menu or changing menu values
+
+float dly_lvl = 0.7f;
+float rvb_lvl = 0.7f;
 
 void UpdateOled()
 {
     bluemchen.display.Fill(false);
 
-    bluemchen.display.SetCursor(0, 0);
-    std::string str = rvb_mode_names[rvb_mode];
+    // draw an arrow on selected menu item
+    bluemchen.display.SetCursor(0, sel_m_it_row*8);
+    std::string str = ">";
     char *cstr = &str[0];
     bluemchen.display.WriteString(cstr, Font_6x8, true);
 
+    //menu item 0
+    bluemchen.display.SetCursor(sel_m_it_row == 0 ? 7 : 0, 0);
+    str = rvb_mode_names[rvb_mode];
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it_row == 0 && chg_val));
+
+    //menu item 1
+    bluemchen.display.SetCursor(sel_m_it_row == 1 ? 7 : 0, 8);
+    str = dl_mult_strings[dl_mult_setting];
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it_row == 1 && chg_val));
+
+    //menu item 2
+    bluemchen.display.SetCursor(sel_m_it_row == 2 ? 7 : 0, 16);
+    str = "r: " + std::to_string(static_cast<int>(rvb_lvl*10));
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it_row == 2 && chg_val));
+
+    //menu item 3
+    bluemchen.display.SetCursor(sel_m_it_row == 3 ? 7 : 0, 24);
+    str = "d: " + std::to_string(static_cast<int>(dly_lvl*10));
+    bluemchen.display.WriteString(cstr, Font_6x8, !(sel_m_it_row == 3 && chg_val));
+
+
+
+    bluemchen.display.SetCursor(46, 16);
+    str = std::to_string(static_cast<int>(cpumeter.GetAvgCpuLoad()*100));
+    str = str + "%";
+    bluemchen.display.WriteString(cstr, Font_6x8, true);
 
     bluemchen.display.SetCursor(46, 24);
-    //str = std::to_string(static_cast<int>(bpm.getBpm()));
+    str = std::to_string(static_cast<int>(bpm.GetBpm()));
     bluemchen.display.WriteString(cstr, Font_6x8, true);
+
 
 
     bluemchen.display.Update();
@@ -70,18 +118,67 @@ void UpdateControls()
     knob1.Process();
     knob2.Process();
 
-    if(bluemchen.encoder.RisingEdge()) {
-        rvb_mode = ++rvb_mode > 1 ? 0 : 1;
+    if (bluemchen.encoder.RisingEdge()) {
+        chg_val = !chg_val;
     }
 
-    _rvb_lp_freq = knob1.Value();
-    _rvb_time = knob2.Value();
+    int incr = bluemchen.encoder.Increment();
+    float incr_dec = 0.1f * incr;
+
+    if(chg_val) {
+
+      switch(sel_m_it_row) {
+        case 0: // reverb mode
+          if(incr != 0)
+            rvb_mode = ++rvb_mode > 1 ? 0 : 1;
+        break;
+        case 1: // delay mult/div
+          if(dl_mult_setting + incr < DL_MULT_COUNT && 
+             dl_mult_setting + incr >= 0){
+
+            dl_mult_setting += incr;
+          }
+        break;
+        case 2: // reverb level
+          if (rvb_lvl + incr_dec < 1.0f && 
+              rvb_lvl + incr_dec >= 0) 
+            rvb_lvl += incr_dec;
+        break;
+        case 3: // delay level
+          if (dly_lvl + incr_dec < 1.0f && 
+              dly_lvl + incr_dec >= 0)
+            dly_lvl += incr_dec;
+        break;
+      }
+
+    } else {
+
+      if(sel_m_it_row + incr < MENU_ITEMS && 
+         sel_m_it_row + incr >= 0) {
+
+        sel_m_it_row += incr;
+
+      } else if (sel_m_it_row+incr >= MENU_ITEMS) sel_m_it_row = 0; // round robin the menu items
+        else if (sel_m_it_row+incr < 0) sel_m_it_row = MENU_ITEMS-1;
+
+
+
+    }
+
+    _rvb_time = knob1.Value();
+    //_rvb_lp_freq = knob2.Value();
+
+    delay.SetFeedback(knob2.Value());
+
 
     cv1.Process();
     cv2.Process();
 
     if (cv1.Value() > 500.0f && incoming_gate == false) {
-        //bpm.Process();
+        bpm.Process();
+
+        delay.SetDelay((SAMPLE_RATE*60*dl_mult[dl_mult_setting]) / bpm.GetBpm());
+
         incoming_gate = true;
     }
 
@@ -93,15 +190,28 @@ void UpdateControls()
 
 void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, size_t size)
 {
+    cpumeter.OnBlockStart();
+
     UpdateControls();
     for (size_t i = 0; i < size; i++)
     {
 
-        float rings_sig_l = in[0][i];
-        float rings_sig_r = in[1][i];
+        float sig_l = in[0][i];
+        float sig_r = in[1][i];
 
-        clouds_frame.l = rings_sig_l;
-        clouds_frame.r = rings_sig_r;
+        // left input signal will go to both reverbs
+        float rings_sig_l = sig_l;
+        float rings_sig_r = sig_l;
+
+        clouds_frame.l = sig_l;
+        clouds_frame.r = sig_l;
+
+
+        //right input signal goes to delay
+
+        float dly_sig_l = sig_r;
+        float dly_sig_r = sig_r;
+
 
         rings_reverb.set_amount(1);
         rings_reverb.set_time(_rvb_time);// 0.5f + (0.49f * patch_position));
@@ -113,22 +223,26 @@ void AudioCallback(AudioHandle::InputBuffer in, AudioHandle::OutputBuffer out, s
         clouds_reverb.set_input_gain(0.8);
         clouds_reverb.set_lp(_rvb_lp_freq);// : 0.6f);
 
-        rings_reverb.Process(&rings_sig_l, &rings_sig_r, 1);
+        rings_reverb.Process(&sig_l, &sig_r, 1);
 
         clouds_reverb.Process(&clouds_frame, 1);
 
+        delay.Process(&dly_sig_l, &dly_sig_r);
+
         switch(rvb_mode) {
             case CLOUDS_MODE:
-                out[0][i] = clouds_frame.l;
-                out[1][i] = clouds_frame.r;
+                out[0][i] = (clouds_frame.l*rvb_lvl) + (dly_sig_l*dly_lvl);
+                out[1][i] = (clouds_frame.r*rvb_lvl) + (dly_sig_r*dly_lvl);
             break;
             case RINGS_MODE:
-                out[0][i] = rings_sig_l;
-                out[1][i] = rings_sig_r;
+                out[0][i] = (rings_sig_l*rvb_lvl) + (dly_sig_l*dly_lvl);
+                out[1][i] = (rings_sig_r*rvb_lvl) + (dly_sig_r*dly_lvl);
             break;
 
         }
     }
+
+  cpumeter.OnBlockEnd();
 }
 
 int main(void)
@@ -149,7 +263,9 @@ int main(void)
     clouds_reverb.set_diffusion(_diffusion);
 
     bpm.Init();
-    delay.Init(SAMPLE_RATE*4);
+    delay.Init(max_delay_time, delaylineMemL, delaylineMemR);
+
+    cpumeter.Init(SAMPLE_RATE, 48);
 
     bluemchen.StartAudio(AudioCallback);
 

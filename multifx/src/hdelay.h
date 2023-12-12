@@ -1,54 +1,68 @@
 using namespace daisysp;
 using namespace daisy;
 
+template<typename T, int max_size>
 class hdelay
 {
 public:
 	hdelay() {};
 	~hdelay() {};
 
-	void Init(float _delay_lenght) {
+	void Init(float _delay_lenght, DelayLine<T, max_size> * _dl_l, DelayLine<T, max_size> * _dl_r) {
     for (int i = 0; i < 3; ++i) {
-      delaylineMemL[i].Init();
-      delaylineL[i] = &delaylineMemL[i];
+      _dl_l[i].Init();
+      delayLineL[i] = &_dl_l[i];
     }
 
     for (int i = 0; i < 3; ++i) {
-      delaylineMemR[i].Init();
-      delaylineR[i] = &delaylineMemR[i];
+      _dl_r[i].Init();
+      delayLineR[i] = &_dl_r[i];
     }
 
 		for (int i = 0; i < 3; i++) {
-	    delaylineL[i]->SetDelay(_delay_lenght);
+	    delayLineL[i]->SetDelay(_delay_lenght);
 		}
 
 	  for (int i = 0; i < 3; i++) {
-	    delaylineR[i]->SetDelay(_delay_lenght);
+	    delayLineR[i]->SetDelay(_delay_lenght);
 	  }
 	};
 
-	void Process() {
+	void Process(float * _sig_l, float * _sig_r) {
+
+
+    float dl_l = delayLineL[0]->Read();
+    float dl_r = delayLineR[0]->Read();
+
+    delayLineL[0]->Write( (*_sig_l) + dl_l * feedback);
+    delayLineR[0]->Write( (*_sig_r) + dl_r * feedback);
+
+    *_sig_l = dl_l;
+    *_sig_r = dl_r;
 
   };
 
   void SetDelay(float _samples) {
     for (int i = 0; i < 3; i++) {
-      delaylineL[i]->SetDelay(_samples);
+      delayLineL[i]->SetDelay(_samples);
     }
 
     for (int i = 0; i < 3; i++) {
-      delaylineR[i]->SetDelay(_samples);
+      delayLineR[i]->SetDelay(_samples);
     }
   };
 
+  void SetFeedback(float _f) {
+    feedback = _f;
+  }
+
 private:
 	static const int DL_MULT_COUNT = 13;
-	daisysp::DelayLine<float, 1> delaylineMemL[3];
-	daisysp::DelayLine<float, 1> delaylineMemR[3];
-	daisysp::DelayLine<float, 1> *delaylineL[3];
-	daisysp::DelayLine<float, 1> *delaylineR[3];
 
-	const float dl_mult[DL_MULT_COUNT] =         {0.0625f, 0.125f, 0.25f, 0.50f, 0.75f, 1.f, 2.f, 3.f, 4.f, 8.f, 16.f, 32.f, 64.f};
-	std::string dl_mult_strings[DL_MULT_COUNT] = { "1/16",  "1/8", "1/4", "1/2", "3/4", "1", "2", "3", "4", "8", "16", "32", "64"};
+	DelayLine<T, max_size> *delayLineL[3];
+
+  DelayLine<T, max_size>  *delayLineR[3];
+
+  float feedback = .75f;
 
 };
